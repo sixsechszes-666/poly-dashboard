@@ -1,0 +1,17 @@
+node_modules
+dist
+*.local
+.DS_Store
+npm-debug.log*
+
+# сборка TypeScript
+*.tsbuildinfo
+
+# локальные настройки инструментов
+.claude/
+
+# временные кадры и скриншоты для README
+_shots/
+
+# локальный скрипт съёмки превью
+_capture.py
