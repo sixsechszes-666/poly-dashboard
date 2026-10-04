@@ -1,19 +1,25 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState, type RefObject } from 'react'
 import { resolveTrader } from './lib/resolve'
+import { FEATURED_TRADERS } from './lib/featured'
 import type { ProfileSearchResult } from './types'
 import { useTrader } from './hooks/useTrader'
 import { TraderCard, CARD_SIZE } from './components/TraderCard'
 
 export default function App() {
   const [input, setInput] = useState('')
-  const [address, setAddress] = useState<string | null>(null)
+  // Opens on a ready example, so nobody has to go hunting for a trader first.
+  const [featured, setFeatured] = useState<number | null>(0)
+  const [address, setAddress] = useState<string | null>(
+    FEATURED_TRADERS[0].address,
+  )
   const [resolveMsg, setResolveMsg] = useState('')
   const [choices, setChoices] = useState<ProfileSearchResult[]>([])
   const [resolving, setResolving] = useState(false)
   const [recording, setRecording] = useState(false)
 
   const { data, isLoading, isError, error } = useTrader(address)
-  const scale = useFitScale(recording)
+  const headerRef = useRef<HTMLDivElement>(null)
+  const scale = useFitScale(recording, headerRef)
 
   // Replay token — bumping it remounts the card and restarts the animation.
   const [playId, setPlayId] = useState(0)
@@ -41,6 +47,7 @@ export default function App() {
     setResolving(true)
     setResolveMsg('')
     setChoices([])
+    setFeatured(null)
     setAddress(null)
     try {
       const r = await resolveTrader(input)
@@ -48,7 +55,7 @@ export default function App() {
         setAddress(r.address)
       } else if (r.kind === 'choices') {
         setChoices(r.choices)
-        setResolveMsg('Несколько трейдеров — выбери нужного:')
+        setResolveMsg('Несколько трейдеров - выбери нужного:')
       } else {
         setResolveMsg(
           'Трейдер не найден. Вставь ссылку на профиль с адресом 0x…',
@@ -59,6 +66,16 @@ export default function App() {
     } finally {
       setResolving(false)
     }
+  }
+
+  function pickFeatured(i: number) {
+    const t = FEATURED_TRADERS[i]
+    setFeatured(i)
+    setInput('')
+    setChoices([])
+    setResolveMsg('')
+    if (t.address === address) replay()
+    else setAddress(t.address)
   }
 
   const card = data && (
@@ -82,7 +99,10 @@ export default function App() {
   // ---------- normal mode ----------
   return (
     <div className="flex min-h-screen flex-col items-center">
-      <div className="flex w-full max-w-2xl flex-col items-center gap-3 px-4 pt-7">
+      <div
+        ref={headerRef}
+        className="flex w-full max-w-2xl flex-col items-center gap-3 px-4 pt-7"
+      >
         <div className="flex w-full gap-2">
           <input
             value={input}
@@ -121,6 +141,31 @@ export default function App() {
           )}
         </div>
 
+        <div className="flex w-full flex-wrap items-center justify-center gap-2">
+          <span className="text-[13px] text-white/30">Примеры:</span>
+          {FEATURED_TRADERS.map((t, i) => (
+            <button
+              key={t.address}
+              onClick={() => pickFeatured(i)}
+              title={t.note}
+              className={`rounded-full px-3.5 py-1.5 text-[13px] font-medium ring-1 transition ${
+                featured === i
+                  ? 'bg-white/[0.14] text-white ring-white/25'
+                  : 'bg-white/[0.05] text-white/55 ring-white/10 hover:bg-white/10 hover:text-white/85'
+              }`}
+            >
+              {t.name}
+            </button>
+          ))}
+        </div>
+
+        {featured !== null && (
+          <p className="text-center text-[12px] text-white/30">
+            {FEATURED_TRADERS[featured].note} · вставь свою ссылку, и карточка
+            пересоберётся
+          </p>
+        )}
+
         {resolveMsg && <p className="text-[13px] text-white/50">{resolveMsg}</p>}
 
         {choices.length > 0 && (
@@ -150,7 +195,7 @@ export default function App() {
 
       <div className="flex w-full flex-1 items-center justify-center p-6">
         {!address && !choices.length && (
-          <Hint text="Вставь ссылку на трейдера — соберём анимированную карточку" />
+          <Hint text="Вставь ссылку на трейдера - соберём анимированную карточку" />
         )}
         {address && isLoading && <Hint text="Загружаю данные трейдера…" />}
         {address && isError && (
@@ -179,25 +224,37 @@ function RecordingHint() {
       className="pointer-events-none fixed bottom-5 left-1/2 -translate-x-1/2 text-[13px] text-white/30 transition-opacity duration-700"
       style={{ opacity: visible ? 1 : 0 }}
     >
-      Esc — выход · Пробел — повтор анимации
+      Esc - выход · Пробел - повтор анимации
     </div>
   )
 }
 
-/** Scale factor so the 1080×1080 card fits the viewport. */
-function useFitScale(recording: boolean) {
+/** Scale factor so the 1080×1080 card fits the viewport under the header. */
+function useFitScale(
+  recording: boolean,
+  headerRef: RefObject<HTMLDivElement | null>,
+) {
   const [scale, setScale] = useState(0.5)
   useEffect(() => {
     const update = () => {
-      const marginH = recording ? 48 : 160
-      const marginW = recording ? 48 : 80
-      const availH = window.innerHeight - marginH
-      const availW = window.innerWidth - marginW
+      // The strip above the card grows with the example chips and the resolve
+      // messages, so measure it rather than assuming a fixed margin.
+      const chromeH = recording
+        ? 48
+        : (headerRef.current?.offsetHeight ?? 0) + 52
+      const chromeW = recording ? 48 : 100
+      const availH = window.innerHeight - chromeH
+      const availW = window.innerWidth - chromeW
       setScale(Math.min(1, availH / CARD_SIZE, availW / CARD_SIZE))
     }
     update()
     window.addEventListener('resize', update)
-    return () => window.removeEventListener('resize', update)
-  }, [recording])
+    const ro = new ResizeObserver(update)
+    if (!recording && headerRef.current) ro.observe(headerRef.current)
+    return () => {
+      window.removeEventListener('resize', update)
+      ro.disconnect()
+    }
+  }, [recording, headerRef])
   return scale
 }
